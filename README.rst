@@ -7,7 +7,7 @@ Acts as an OIDC client against an Apereo CAS OIDC provider.
 
 Example::
 
-    $ ./oidc_client.py https://cas.stage.lafayette.edu/cas/oidc ./client_info.json frosta ./frosta.passwd
+    $ ./oidc_client.py https://cas.example.net/cas/oidc ./client_info.json jamesbond ./007.passwd
 
 Client Configuration
 --------------------
