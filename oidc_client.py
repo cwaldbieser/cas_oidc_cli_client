@@ -92,8 +92,9 @@ def main(args):
             print("ERROR: Could not get TGC!", file=sys.stderr)
             sys.exit(1)
         tgc = s.cookies["TGC"]
-        print("TGC:", tgc)
-        print("")
+        if args.show_tgc:
+            print("TGC:", tgc)
+            print("")
         # Next step is to parse response text HTML, get A tag with ID "allow".
         # HREF attribute is the link back to the client with the authorization
         # code.
@@ -159,6 +160,9 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--show-access-token", action="store_true", help="Show OIDC access token."
+    )
+    parser.add_argument(
+        "--show-tgc", action="store_true", help="Show the CAS TGC."
     )
     args = parser.parse_args()
     main(args)
