@@ -3,6 +3,7 @@
 import argparse
 import getpass
 import json
+import pprint
 import re
 import sys
 from urllib.parse import urlparse
@@ -52,6 +53,7 @@ def main(args):
     auth_req = client.construct_AuthorizationRequest(request_args=client_args)
     login_url = auth_req.request(client.authorization_endpoint)
     print("Login url:", login_url)
+    print("")
     if args.passwd_file is not None:
         passwd = args.passwd_file.read().rstrip()
     else:
@@ -63,6 +65,7 @@ def main(args):
         content = response.text
         cas_login_url = response.url
         print("CAS Login url:", cas_login_url)
+        print("")
         m = execution_pat.search(content)
         if m is None:
             print("ERROR: Could not get execution!", file=sys.stderr)
@@ -103,7 +106,7 @@ def main(args):
         if args.show_headers:
             print_headers(response)
         client_url_with_auth_code = response.headers["Location"]
-        print(client_url_with_auth_code)
+        print("Client URL with authorization code:", client_url_with_auth_code)
         print("")
     p = urlparse(client_url_with_auth_code)
     query_string = p.query
@@ -112,18 +115,22 @@ def main(args):
     )
     code = aresp["code"]
     assert aresp["state"] == session["state"]
-    args = {"code": code}
+    client_args = {"code": code}
+    print("client keyjar:", client.keyjar)
     resp = client.do_access_token_request(
-        state=aresp["state"], request_args=args, authn_method="client_secret_basic"
+        state=aresp["state"],
+        request_args=client_args,
+        authn_method="client_secret_basic",
     )
     if type(resp) != AccessTokenResponse:
         print("No access token!")
         sys.exit(1)
     access_token = aresp["state"]
-    print(access_token)
-    print("")
+    if args.show_access_token:
+        print("Access token:", access_token)
+        print("")
     userinfo = client.do_user_info_request(state=access_token)
-    print(userinfo)
+    pprint.pprint(dict(userinfo))
 
 
 if __name__ == "__main__":
@@ -149,6 +156,9 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--show-headers", action="store_true", help="Show HTTP headers."
+    )
+    parser.add_argument(
+        "--show-access-token", action="store_true", help="Show OIDC access token."
     )
     args = parser.parse_args()
     main(args)
