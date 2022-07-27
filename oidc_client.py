@@ -35,10 +35,11 @@ def main(args):
     verify = not args.no_verify
     user = args.user
     client = Client(client_authn_method=CLIENT_AUTHN_METHOD)
-    client.provider_config(args.issuer)
     info = json.load(args.client_info)
     client_reg = RegistrationResponse(**info)
     client.store_registration_info(client_reg)
+    client.provider_config(args.issuer)
+    client.keyjar[info["client_id"]] = client.keyjar[args.issuer]
     session = {}
     session["state"] = rndstr()
     session["nonce"] = rndstr()
@@ -116,7 +117,6 @@ def main(args):
     code = aresp["code"]
     assert aresp["state"] == session["state"]
     client_args = {"code": code}
-    print("client keyjar:", client.keyjar)
     resp = client.do_access_token_request(
         state=aresp["state"],
         request_args=client_args,
