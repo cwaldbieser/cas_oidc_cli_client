@@ -46,7 +46,7 @@ def main(args):
     client_args = {
         "client_id": client.client_id,
         "response_type": "code",
-        "scope": ["openid"],
+        "scope": ["openid", "email", "profile"],
         "nonce": session["nonce"],
         "redirect_uri": client.registration_response["redirect_uris"][0],
         "state": session["state"],
