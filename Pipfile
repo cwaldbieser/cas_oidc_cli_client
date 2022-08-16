@@ -9,6 +9,7 @@ requests = "*"
 beautifulsoup4 = "*"
 
 [dev-packages]
+pudb = "*"
 
 [requires]
 python_version = "3.9"
