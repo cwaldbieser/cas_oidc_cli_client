@@ -3,6 +3,7 @@
 import argparse
 import getpass
 import json
+import logging
 import pprint
 import re
 import sys
@@ -13,11 +14,11 @@ import requests
 from bs4 import BeautifulSoup
 from oic import rndstr
 from oic.oic import Client
+# from oic.oic.message import (AccessTokenResponse, AuthorizationResponse,
+#                              RegistrationResponse)
 from oic.oic.message import (AccessTokenResponse, AuthorizationResponse,
                              RegistrationResponse)
 from oic.utils.authn.client import CLIENT_AUTHN_METHOD
-
-# https://cas.stage.lafayette.edu/cas/oidc/.well-known
 
 execution_pat = re.compile(r'<input type="hidden" name="execution" value="([^"]+)"')
 eventid_pat = re.compile(r'<input type="hidden" name="_eventId" value="([^"]+)"')
@@ -32,6 +33,7 @@ def print_headers(r):
 
 
 def main(args):
+    set_log_level(args.log_level)
     verify = not args.no_verify
     user = args.user
     client = Client(client_authn_method=CLIENT_AUTHN_METHOD)
@@ -45,10 +47,10 @@ def main(args):
     session["nonce"] = rndstr()
     client_args = {
         "client_id": client.client_id,
-        "response_type": "code",
-        "scope": ["openid", "email", "profile"],
         "nonce": session["nonce"],
         "redirect_uri": client.registration_response["redirect_uris"][0],
+        "response_type": "code",
+        "scope": ["openid", "email", "profile"],
         "state": session["state"],
     }
     auth_req = client.construct_AuthorizationRequest(request_args=client_args)
@@ -126,12 +128,24 @@ def main(args):
     if type(resp) != AccessTokenResponse:
         print("No access token!")
         sys.exit(1)
+    id_token = resp["id_token"]
+    print("= ID token =")
+    pprint.pprint(id_token.to_dict())
+    print("")
     access_token = aresp["state"]
     if args.show_access_token:
         print("Access token:", access_token)
         print("")
-    userinfo = client.do_user_info_request(state=access_token)
+    userinfo = client.do_user_info_request(
+        state=access_token,
+    )
+    print("= UserInfo endpoint data =")
     pprint.pprint(dict(userinfo))
+
+
+def set_log_level(level_str):
+    log_level = getattr(logging, level_str)
+    logging.basicConfig(level=log_level)
 
 
 if __name__ == "__main__":
@@ -161,8 +175,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--show-access-token", action="store_true", help="Show OIDC access token."
     )
+    parser.add_argument("--show-tgc", action="store_true", help="Show the CAS TGC.")
     parser.add_argument(
-        "--show-tgc", action="store_true", help="Show the CAS TGC."
+        "--log-level",
+        action="store",
+        default="WARN",
+        choices=["ERROR", "WARN", "INFO", "DEBUG"],
+        help="Set logging level.",
     )
     args = parser.parse_args()
     main(args)
