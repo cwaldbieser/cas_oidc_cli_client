@@ -7,7 +7,7 @@ import logging
 import pprint
 import re
 import sys
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 # from oic.utils.http_util import Redirect
 import requests
@@ -30,6 +30,19 @@ def print_headers(r):
         print("  {}: {}".format(k, v), file=sys.stdout)
     print("status code:", r.status_code)
     print("")
+
+
+def get_cas_endpoint_prefix(cas_login_url):
+    """
+    Get the CAS URL prefix.
+    E.g. https://cas.example.net/cas
+    """
+    p = urlparse(cas_login_url)
+    scheme, netloc, path, junk1, junk2, junk3 = p
+    path_parts = path.split("/")
+    prefix_path = "/".join(path_parts[:-1])
+    prefix = urlunparse((scheme, netloc, prefix_path, "", "", ""))
+    return prefix
 
 
 def main(args):
@@ -69,6 +82,7 @@ def main(args):
         cas_login_url = response.url
         print("CAS Login url:", cas_login_url)
         print("")
+        cas_prefix = get_cas_endpoint_prefix(cas_login_url)
         m = execution_pat.search(content)
         if m is None:
             print("ERROR: Could not get execution!", file=sys.stderr)
@@ -87,7 +101,10 @@ def main(args):
             "_eventId": event_id,
             "geolocation": "",
         }
-        response = s.post(cas_login_url, data=data, verify=verify)
+        allow_redirects = args.approval_prompt
+        response = s.post(
+            cas_login_url, data=data, verify=verify, allow_redirects=allow_redirects
+        )
         if args.show_headers:
             print_headers(response)
         if "TGC" not in s.cookies.keys():
@@ -97,19 +114,29 @@ def main(args):
         if args.show_tgc:
             print("TGC:", tgc)
             print("")
-        # Next step is to parse response text HTML, get A tag with ID "allow".
-        # HREF attribute is the link back to the client with the authorization
-        # code.
-        html_doc = response.text
-        soup = BeautifulSoup(html_doc, "html.parser")
-        allow_tag = soup.find(id="allow")
-        link = allow_tag.get("href")
-        print("allow link:", link)
-        print("")
-        response = s.get(link, verify=verify, allow_redirects=False)
-        if args.show_headers:
-            print_headers(response)
-        client_url_with_auth_code = response.headers["Location"]
+        if not args.approval_prompt:
+            url = response.headers["Location"]
+            while response.status_code == 302 and url.startswith(cas_prefix):
+                print("Redirecting to: {}".format(url))
+                response = s.get(url, allow_redirects=False)
+                if args.show_headers:
+                    print_headers(response)
+                url = response.headers["Location"]
+            client_url_with_auth_code = url
+        else:
+            # Next step is to parse response text HTML, get A tag with ID "allow".
+            # HREF attribute is the link back to the client with the authorization
+            # code.
+            html_doc = response.text
+            soup = BeautifulSoup(html_doc, "html.parser")
+            allow_tag = soup.find(id="allow")
+            link = allow_tag.get("href")
+            print("allow link:", link)
+            print("")
+            response = s.get(link, verify=verify, allow_redirects=False)
+            if args.show_headers:
+                print_headers(response)
+            client_url_with_auth_code = response.headers["Location"]
         print("Client URL with authorization code:", client_url_with_auth_code)
         print("")
     p = urlparse(client_url_with_auth_code)
@@ -168,6 +195,11 @@ if __name__ == "__main__":
         "--no-verify",
         action="store_true",
         help="Disable TLS verification for the OIDC provider URLs.",
+    )
+    parser.add_argument(
+        "--approval-prompt",
+        action="store_true",
+        help="Activate if the OIDC flow includes an approval step.",
     )
     parser.add_argument(
         "--show-headers", action="store_true", help="Show HTTP headers."
