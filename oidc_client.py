@@ -58,12 +58,14 @@ def main(args):
     session = {}
     session["state"] = rndstr()
     session["nonce"] = rndstr()
+    requested_scopes = ["openid", "email", "profile"]
+    requested_scopes.extend(args.scope)
     client_args = {
         "client_id": client.client_id,
         "nonce": session["nonce"],
         "redirect_uri": client.registration_response["redirect_uris"][0],
         "response_type": "code",
-        "scope": ["openid", "email", "profile"],
+        "scope": requested_scopes,
         "state": session["state"],
     }
     auth_req = client.construct_AuthorizationRequest(request_args=client_args)
@@ -208,6 +210,12 @@ if __name__ == "__main__":
         "--show-access-token", action="store_true", help="Show OIDC access token."
     )
     parser.add_argument("--show-tgc", action="store_true", help="Show the CAS TGC.")
+    parser.add_argument(
+        "-s",
+        "--scope",
+        action="append",
+        help="Scope to request. May be specified multiple times.",
+    )
     parser.add_argument(
         "--log-level",
         action="store",

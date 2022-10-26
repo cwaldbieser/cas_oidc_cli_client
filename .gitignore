@@ -1,4 +1,4 @@
 
 *.passwd
-client_info.json
+*.json
 
