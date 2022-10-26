@@ -59,7 +59,8 @@ def main(args):
     session["state"] = rndstr()
     session["nonce"] = rndstr()
     requested_scopes = ["openid", "email", "profile"]
-    requested_scopes.extend(args.scope)
+    if args.scope is not None:
+        requested_scopes.extend(args.scope)
     client_args = {
         "client_id": client.client_id,
         "nonce": session["nonce"],
