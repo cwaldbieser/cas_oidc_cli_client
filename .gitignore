@@ -1,4 +1,4 @@
 
 *.passwd
 *.json
-
+*.pyinit

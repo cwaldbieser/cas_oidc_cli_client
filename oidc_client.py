@@ -14,62 +14,28 @@ import requests
 from bs4 import BeautifulSoup
 from oic import rndstr
 from oic.oic import Client
+
 # from oic.oic.message import (AccessTokenResponse, AuthorizationResponse,
 #                              RegistrationResponse)
-from oic.oic.message import (AccessTokenResponse, AuthorizationResponse,
-                             RegistrationResponse)
+from oic.oic.message import (
+    AccessTokenResponse,
+    AuthorizationResponse,
+    RegistrationResponse,
+)
 from oic.utils.authn.client import CLIENT_AUTHN_METHOD
 
 execution_pat = re.compile(r'<input type="hidden" name="execution" value="([^"]+)"')
 eventid_pat = re.compile(r'<input type="hidden" name="_eventId" value="([^"]+)"')
 
 
-def print_headers(r):
-    print("- Response Headers -", file=sys.stdout)
-    for k, v in r.headers.items():
-        print("  {}: {}".format(k, v), file=sys.stdout)
-    print("status code:", r.status_code)
-    print("")
-
-
-def get_cas_endpoint_prefix(cas_login_url):
-    """
-    Get the CAS URL prefix.
-    E.g. https://cas.example.net/cas
-    """
-    p = urlparse(cas_login_url)
-    scheme, netloc, path, junk1, junk2, junk3 = p
-    path_parts = path.split("/")
-    prefix_path = "/".join(path_parts[:-1])
-    prefix = urlunparse((scheme, netloc, prefix_path, "", "", ""))
-    return prefix
-
-
 def main(args):
+    """
+    Main program entry point.
+    """
     set_log_level(args.log_level)
     verify = not args.no_verify
     user = args.user
-    client = Client(client_authn_method=CLIENT_AUTHN_METHOD)
-    info = json.load(args.client_info)
-    client_reg = RegistrationResponse(**info)
-    client.store_registration_info(client_reg)
-    client.provider_config(args.issuer)
-    client.keyjar[info["client_id"]] = client.keyjar[args.issuer]
-    session = {}
-    session["state"] = rndstr()
-    session["nonce"] = rndstr()
-    requested_scopes = ["openid", "email", "profile"]
-    if args.scope is not None:
-        requested_scopes.extend(args.scope)
-    client_args = {
-        "client_id": client.client_id,
-        "nonce": session["nonce"],
-        "redirect_uri": client.registration_response["redirect_uris"][0],
-        "response_type": "code",
-        "scope": requested_scopes,
-        "state": session["state"],
-    }
-    auth_req = client.construct_AuthorizationRequest(request_args=client_args)
+    auth_req, client, info, session, client_args = create_oidc_client(args.scope, args.issuer)
     login_url = auth_req.request(client.authorization_endpoint)
     print("Login url:", login_url)
     print("")
@@ -77,9 +43,71 @@ def main(args):
         passwd = args.passwd_file.read().rstrip()
     else:
         passwd = getpass.getpass()
+    client_url_with_auth_code = perform_cas_authentication(
+        login_url,
+        verify,
+        user,
+        passwd,
+        show_headers=args.show_headers,
+        approval_prompt=args.approval_prompt,
+        show_tgc=args.show_tgc,
+    )
+    p = urlparse(client_url_with_auth_code)
+    query_string = p.query
+    aresp = client.parse_response(
+        AuthorizationResponse, info=query_string, sformat="urlencoded"
+    )
+    print("Authorization response parsed!")
+    print("")
+    code = aresp["code"]
+    assert aresp["state"] == session["state"]
+    client_args = {"code": code}
+    print(f"code: {code}, state: {aresp['state']}")
+    resp = client.do_access_token_request(
+        state=aresp["state"],
+        request_args=client_args,
+        authn_method="client_secret_basic",
+    )
+    print("Access token request has been filled.")
+    print("")
+    if type(resp) != AccessTokenResponse:
+        print("No access token!")
+        sys.exit(1)
+    id_token = resp["id_token"]
+    print("= ID token =")
+    pprint.pprint(id_token.to_dict())
+    print("")
+    access_token = aresp["state"]
+    if args.show_access_token:
+        print("Access token:", access_token)
+        print("")
+    userinfo = client.do_user_info_request(
+        state=access_token,
+    )
+    print("= UserInfo endpoint data =")
+    pprint.pprint(dict(userinfo))
+
+
+def set_log_level(level_str):
+    log_level = getattr(logging, level_str)
+    logging.basicConfig(level=log_level)
+
+
+def perform_cas_authentication(
+    login_url,
+    verify,
+    user,
+    passwd,
+    show_headers=False,
+    approval_prompt=False,
+    show_tgc=False,
+):
+    """
+    Perform the CAS authentication flow to obtain a CAS session (TGC).
+    """
     with requests.Session() as s:
         response = s.get(login_url, verify=verify)
-        if args.show_headers:
+        if show_headers:
             print_headers(response)
         content = response.text
         cas_login_url = response.url
@@ -104,25 +132,25 @@ def main(args):
             "_eventId": event_id,
             "geolocation": "",
         }
-        allow_redirects = args.approval_prompt
+        allow_redirects = approval_prompt
         response = s.post(
             cas_login_url, data=data, verify=verify, allow_redirects=allow_redirects
         )
-        if args.show_headers:
+        if show_headers:
             print_headers(response)
         if "TGC" not in s.cookies.keys():
             print("ERROR: Could not get TGC!", file=sys.stderr)
             sys.exit(1)
         tgc = s.cookies["TGC"]
-        if args.show_tgc:
+        if show_tgc:
             print("TGC:", tgc)
             print("")
-        if not args.approval_prompt:
+        if not approval_prompt:
             url = response.headers["Location"]
             while response.status_code == 302 and url.startswith(cas_prefix):
                 print("Redirecting to: {}".format(url))
                 response = s.get(url, allow_redirects=False)
-                if args.show_headers:
+                if show_headers:
                     print_headers(response)
                 url = response.headers["Location"]
             client_url_with_auth_code = url
@@ -137,45 +165,62 @@ def main(args):
             print("allow link:", link)
             print("")
             response = s.get(link, verify=verify, allow_redirects=False)
-            if args.show_headers:
+            if show_headers:
                 print_headers(response)
             client_url_with_auth_code = response.headers["Location"]
         print("Client URL with authorization code:", client_url_with_auth_code)
         print("")
-    p = urlparse(client_url_with_auth_code)
-    query_string = p.query
-    aresp = client.parse_response(
-        AuthorizationResponse, info=query_string, sformat="urlencoded"
-    )
-    code = aresp["code"]
-    assert aresp["state"] == session["state"]
-    client_args = {"code": code}
-    resp = client.do_access_token_request(
-        state=aresp["state"],
-        request_args=client_args,
-        authn_method="client_secret_basic",
-    )
-    if type(resp) != AccessTokenResponse:
-        print("No access token!")
-        sys.exit(1)
-    id_token = resp["id_token"]
-    print("= ID token =")
-    pprint.pprint(id_token.to_dict())
+    return client_url_with_auth_code
+
+
+def create_oidc_client(scope, issuer):
+    """
+    Initialize the OIDC client.
+    """
+    client = Client(client_authn_method=CLIENT_AUTHN_METHOD)
+    info = json.load(args.client_info)
+    client_reg = RegistrationResponse(**info)
+    client.store_registration_info(client_reg)
+    client.provider_config(args.issuer)
+    # Copy the keyjar entry for the issuer (url) to the client_id.
+    client.keyjar[info["client_id"]] = client.keyjar[issuer]
+    session = {}
+    session["state"] = rndstr()
+    session["nonce"] = rndstr()
+    requested_scopes = ["openid", "email", "profile"]
+    if scope is not None:
+        requested_scopes.extend(scope)
+    client_args = {
+        "client_id": client.client_id,
+        "nonce": session["nonce"],
+        "redirect_uri": client.registration_response["redirect_uris"][0],
+        "response_type": "code",
+        "scope": requested_scopes,
+        "state": session["state"],
+    }
+    auth_req = client.construct_AuthorizationRequest(request_args=client_args)
+    return auth_req, client, info, session, client_args
+
+
+def print_headers(r):
+    print("- Response Headers -", file=sys.stdout)
+    for k, v in r.headers.items():
+        print("  {}: {}".format(k, v), file=sys.stdout)
+    print("status code:", r.status_code)
     print("")
-    access_token = aresp["state"]
-    if args.show_access_token:
-        print("Access token:", access_token)
-        print("")
-    userinfo = client.do_user_info_request(
-        state=access_token,
-    )
-    print("= UserInfo endpoint data =")
-    pprint.pprint(dict(userinfo))
 
 
-def set_log_level(level_str):
-    log_level = getattr(logging, level_str)
-    logging.basicConfig(level=log_level)
+def get_cas_endpoint_prefix(cas_login_url):
+    """
+    Get the CAS URL prefix.
+    E.g. https://cas.example.net/cas
+    """
+    p = urlparse(cas_login_url)
+    scheme, netloc, path, junk1, junk2, junk3 = p
+    path_parts = path.split("/")
+    prefix_path = "/".join(path_parts[:-1])
+    prefix = urlunparse((scheme, netloc, prefix_path, "", "", ""))
+    return prefix
 
 
 if __name__ == "__main__":
