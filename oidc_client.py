@@ -14,14 +14,10 @@ import requests
 from bs4 import BeautifulSoup
 from oic import rndstr
 from oic.oic import Client
-
 # from oic.oic.message import (AccessTokenResponse, AuthorizationResponse,
 #                              RegistrationResponse)
-from oic.oic.message import (
-    AccessTokenResponse,
-    AuthorizationResponse,
-    RegistrationResponse,
-)
+from oic.oic.message import (AccessTokenResponse, AuthorizationResponse,
+                             RegistrationResponse)
 from oic.utils.authn.client import CLIENT_AUTHN_METHOD
 
 execution_pat = re.compile(r'<input type="hidden" name="execution" value="([^"]+)"')
@@ -35,7 +31,9 @@ def main(args):
     set_log_level(args.log_level)
     verify = not args.no_verify
     user = args.user
-    auth_req, client, info, session, client_args = create_oidc_client(args.scope, args.issuer)
+    auth_req, client, info, session, client_args = create_oidc_client(
+        args.scope, args.issuer, verify
+    )
     login_url = auth_req.request(client.authorization_endpoint)
     print("Login url:", login_url)
     print("")
@@ -173,11 +171,11 @@ def perform_cas_authentication(
     return client_url_with_auth_code
 
 
-def create_oidc_client(scope, issuer):
+def create_oidc_client(scope, issuer, verify):
     """
     Initialize the OIDC client.
     """
-    client = Client(client_authn_method=CLIENT_AUTHN_METHOD)
+    client = Client(client_authn_method=CLIENT_AUTHN_METHOD, verify_ssl=verify)
     info = json.load(args.client_info)
     client_reg = RegistrationResponse(**info)
     client.store_registration_info(client_reg)
