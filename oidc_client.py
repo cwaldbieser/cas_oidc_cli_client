@@ -19,6 +19,7 @@ from oic.oic import Client
 from oic.oic.message import (AccessTokenResponse, AuthorizationResponse,
                              RegistrationResponse)
 from oic.utils.authn.client import CLIENT_AUTHN_METHOD
+from oic.utils.settings import PyoidcSettings
 
 execution_pat = re.compile(r'<input type="hidden" name="execution" value="([^"]+)"')
 eventid_pat = re.compile(r'<input type="hidden" name="_eventId" value="([^"]+)"')
@@ -32,7 +33,9 @@ def main(args):
     verify = not args.no_verify
     user = args.user
     auth_req, client, info, session, client_args = create_oidc_client(
-        args.scope, args.issuer, verify
+        args.scope,
+        args.issuer,
+        verify,
     )
     login_url = auth_req.request(client.authorization_endpoint)
     print("Login url:", login_url)
@@ -68,7 +71,7 @@ def main(args):
     )
     print("Access token request has been filled.")
     print("")
-    if type(resp) != AccessTokenResponse:
+    if not isinstance(resp, AccessTokenResponse):
         print("No access token!")
         sys.exit(1)
     id_token = resp["id_token"]
@@ -171,17 +174,22 @@ def perform_cas_authentication(
     return client_url_with_auth_code
 
 
-def create_oidc_client(scope, issuer, verify):
+def create_oidc_client(scope, issuer, verify, allow_issuer_mismatch=False):
     """
     Initialize the OIDC client.
     """
-    client = Client(client_authn_method=CLIENT_AUTHN_METHOD, verify_ssl=verify)
+    settings = PyoidcSettings(verify_ssl=verify)
+    client = Client(client_authn_method=CLIENT_AUTHN_METHOD, settings=settings)
+    client.allow["issuer_mismatch"] = allow_issuer_mismatch
     info = json.load(args.client_info)
     client_reg = RegistrationResponse(**info)
     client.store_registration_info(client_reg)
     client.provider_config(args.issuer)
     # Copy the keyjar entry for the issuer (url) to the client_id.
-    client.keyjar[info["client_id"]] = client.keyjar[issuer]
+    # if real_issuer is None:
+    #     client.keyjar[info["client_id"]] = client.keyjar[issuer]
+    # else:
+    #     client.keyjar[info["client_id"]] = client.keyjar[real_issuer]
     session = {}
     session["state"] = rndstr()
     session["nonce"] = rndstr()
